@@ -59,14 +59,20 @@ exports.addPaymentSource = functions.firestore.document('/stripe_customers/{user
     try {
         const snapshot = await admin.firestore().collection('stripe_customers').doc(context.params.userId).get();
         const customer = snapshot.data().customer_id;
+        const paymentAttachResponse = await stripe.paymentMethods.attach(token, {
+            customer: customer
+        });
+        console.log(paymentAttachResponse);
         const response = await stripe.customers.update(customer, {
             invoice_settings: {
-                default_payment_method: token,
+                default_payment_method: paymentAttachResponse.id,
             }
         });
-        return admin.firestore().collection('stripe_customers').doc(context.params.userId).collection("paymentmethods").doc(response.fingerprint).set(response, { merge: true });
+        console.log(response);
+        return admin.firestore().collection('stripe_customers').doc(context.params.userId).update(response, { merge: true });
     } catch (error) {
         await snap.ref.set({ 'error': userFacingMessage(error) }, { merge: true });
+        console.error(error);
         return null;
         // return reportError(error, { user: context.params.userId });
     }
