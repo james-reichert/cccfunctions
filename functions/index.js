@@ -48,6 +48,19 @@ exports.createStripeCustomer = functions.auth.user().onCreate(async (user) => {
     return admin.firestore().collection('stripe_customers').doc(user.uid).set({ customer_id: customer.id });
 });
 
+exports.setDefaultPaymentMethod = functions.firestore.document('/stripe_customers/{userId}').onUpdate(async (change, context) => {
+    const updatedPm = change.after.data().invoice_settings.default_payment_method;
+    const previousPm = change.before.data().invoice_settings.default_payment_method;
+    if (updatedPm !== previousPm) {
+        try {
+            const customer = await getCustomer(context);
+            await setDefaultPaymentMethod(customer, updatedPm);
+        } catch (error) {
+            return handleError(change.after, error);
+        }
+    }
+});
+
 // Add a payment source (card) for a user by writing a stripe payment source token to Cloud Firestore
 exports.addPaymentSource = functions.firestore.document('/stripe_customers/{userId}/cards/{pushId}').onCreate(async (snap, context) => {
     const payment_method = snap.data();
@@ -57,24 +70,15 @@ exports.addPaymentSource = functions.firestore.document('/stripe_customers/{user
     }
 
     try {
-        const snapshot = await admin.firestore().collection('stripe_customers').doc(context.params.userId).get();
-        const customer = snapshot.data().customer_id;
+        const customer = await getCustomer(context);
         const paymentAttachResponse = await stripe.paymentMethods.attach(token, {
             customer: customer
         });
+        const paymentMethodId = paymentAttachResponse.id;
         console.log(paymentAttachResponse);
-        const response = await stripe.customers.update(customer, {
-            invoice_settings: {
-                default_payment_method: paymentAttachResponse.id,
-            }
-        });
-        console.log(response);
-        return admin.firestore().collection('stripe_customers').doc(context.params.userId).update(response, { merge: true });
+        await setDefaultPaymentMethod(customer, paymentMethodId);
     } catch (error) {
-        await snap.ref.set({ 'error': userFacingMessage(error) }, { merge: true });
-        console.error(error);
-        return null;
-        // return reportError(error, { user: context.params.userId });
+        return await handleError(snap, error);
     }
 });
 
@@ -85,6 +89,28 @@ exports.cleanupUser = functions.auth.user().onDelete(async (user) => {
     await stripe.customers.del(customer.customer_id);
     return admin.firestore().collection('stripe_customers').doc(user.uid).delete();
 });
+
+async function handleError(snap, error) {
+    await snap.ref.set({ 'error': userFacingMessage(error) }, { merge: true });
+    console.error(error);
+    return null;
+}
+
+async function getCustomer(context) {
+    const snapshot = await admin.firestore().collection('stripe_customers').doc(context.params.userId).get();
+    const customer = snapshot.data().customer_id;
+    return customer;
+}
+
+async function setDefaultPaymentMethod(customer, paymentMethodId) {
+    const response = await stripe.customers.update(customer, {
+        invoice_settings: {
+            default_payment_method: paymentMethodId,
+        }
+    });
+    console.log(response);
+    return admin.firestore().collection('stripe_customers').doc(context.params.userId).update(response, { merge: true });
+}
 
 // To keep on top of errors, we should raise a verbose error report with Stackdriver rather
 // than simply relying on console.error. This will calculate users affected + send you email
