@@ -54,7 +54,7 @@ exports.setDefaultPaymentMethod = functions.firestore.document('/stripe_customer
     if (updatedPm !== previousPm) {
         try {
             const customer = await getCustomer(context);
-            await setDefaultPaymentMethod(customer, updatedPm);
+            await setDefaultPaymentMethod(customer, updatedPm, context);
         } catch (error) {
             return handleError(change.after, error);
         }
@@ -76,7 +76,7 @@ exports.addPaymentSource = functions.firestore.document('/stripe_customers/{user
         });
         const paymentMethodId = paymentAttachResponse.id;
         console.log(paymentAttachResponse);
-        await setDefaultPaymentMethod(customer, paymentMethodId);
+        await setDefaultPaymentMethod(customer, paymentMethodId, context);
     } catch (error) {
         return await handleError(snap, error);
     }
@@ -102,7 +102,7 @@ async function getCustomer(context) {
     return customer;
 }
 
-async function setDefaultPaymentMethod(customer, paymentMethodId) {
+async function setDefaultPaymentMethod(customer, paymentMethodId, context) {
     const response = await stripe.customers.update(customer, {
         invoice_settings: {
             default_payment_method: paymentMethodId,
