@@ -56,7 +56,7 @@ exports.setDefaultPaymentMethod = functions.firestore.document('/stripe_customer
             const customer = await getCustomer(context);
             await setDefaultPaymentMethod(customer, updatedPm, context);
         } catch (error) {
-            return handleError(change.after, error);
+            return handleFirebaseCallbackError(change.after, error);
         }
     }
 });
@@ -78,7 +78,18 @@ exports.addPaymentSource = functions.firestore.document('/stripe_customers/{user
         console.log(paymentAttachResponse);
         await setDefaultPaymentMethod(customer, paymentMethodId, context);
     } catch (error) {
-        return await handleError(snap, error);
+        return await handleFirebaseCallbackError(snap, error);
+    }
+});
+
+exports.deletePaymentMethod = functions.https.onCall(async (data, context) => {
+    const paymentMethodId = data.pm_id;
+    try {
+        const response = await stripe.paymentMethods.detach(paymentMethodId);
+        console.log(response);
+        await admin.firestore().collection('stripe_customers').doc(context.params.userId).collection('cards').doc(pm_id).delete();
+    } catch (error) {
+        console.error(error);
     }
 });
 
@@ -90,7 +101,7 @@ exports.cleanupUser = functions.auth.user().onDelete(async (user) => {
     return admin.firestore().collection('stripe_customers').doc(user.uid).delete();
 });
 
-async function handleError(snap, error) {
+async function handleFirebaseCallbackError(snap, error) {
     await snap.ref.set({ 'error': userFacingMessage(error) }, { merge: true });
     console.error(error);
     return null;
